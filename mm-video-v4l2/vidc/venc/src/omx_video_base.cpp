@@ -3744,8 +3744,15 @@ OMX_ERRORTYPE omx_video::empty_buffer_done(OMX_HANDLETYPE         hComp,
             pdest_frame = buffer;
             DEBUG_PRINT_LOW("\n empty_buffer_done pdest_frame address is %p",pdest_frame);
             return push_input_buffer(hComp);
-
-        } else {
+        }
+        //check if empty-EOS-buffer is being returned, treat this same as the
+        //color-conversion case as we queued a color-conversion buffer to encoder
+        bool handleEmptyEosBuffer = (mEmptyEosBuffer == buffer);
+        if (mUsesColorConversion || handleEmptyEosBuffer) {
+            if (handleEmptyEosBuffer) {
+                mEmptyEosBuffer = NULL;
+            }
+            // return color-conversion buffer back to the pool
             DEBUG_PRINT_LOW("\n empty_buffer_done insert address is %p",buffer);
             if (!m_opq_pmem_q.insert_entry((unsigned int)buffer, 0, 0)) {
                 DEBUG_PRINT_ERROR("\n empty_buffer_done: pmem queue is full");
