@@ -3747,7 +3747,6 @@ OMX_ERRORTYPE omx_video::empty_buffer_done(OMX_HANDLETYPE         hComp,
 
         } else {
             DEBUG_PRINT_LOW("\n empty_buffer_done insert address is %p",buffer);
-
             if (!m_opq_pmem_q.insert_entry((unsigned int)buffer, 0, 0)) {
                 DEBUG_PRINT_ERROR("\n empty_buffer_done: pmem queue is full");
                 return OMX_ErrorBadParameter;
@@ -4209,6 +4208,9 @@ OMX_ERRORTYPE  omx_video::empty_this_buffer_opaque(OMX_IN OMX_HANDLETYPE hComp,
     media_buffer = (encoder_media_buffer_type *)buffer->pBuffer;
     private_handle_t *handle = (private_handle_t *)media_buffer->meta_handle;
 
+    if (buffer->nFilledLen == 0 && (buffer->nFlags & OMX_BUFFERFLAG_EOS)) {
+        return push_empty_eos_buffer(hComp, buffer);
+    }
     /*Enable following code once private handle color format is
       updated correctly*/
 
@@ -4400,14 +4402,6 @@ OMX_ERRORTYPE omx_video::push_input_buffer(OMX_HANDLETYPE hComp)
                     index,m_sInPortDef.nBufferCountActual);
             return OMX_ErrorBadParameter;
         }
-
-        //Meta-Buffer with empty filled-length can contain garbage handle
-        //Some clients queue such buffers to signal EOS. Handle this case
-        // separately by queueing an intermediate color-conversion buffer
-        // and propagate the EOS.
-        if (psource_frame->nFilledLen == 0 && (psource_frame->nFlags & OMX_BUFFERFLAG_EOS)) {
-            return push_empty_eos_buffer(hComp, psource_frame);
-        }
         media_buffer = (encoder_media_buffer_type *)psource_frame->pBuffer;
         /*Will enable to verify camcorder in current TIPS can be removed*/
         if (media_buffer->buffer_type == kMetadataBufferTypeCameraSource) {
@@ -4441,12 +4435,7 @@ OMX_ERRORTYPE omx_video::push_empty_eos_buffer(OMX_HANDLETYPE hComp,
     OMX_BUFFERHEADERTYPE* opqBuf = NULL;
     OMX_ERRORTYPE retVal = OMX_ErrorNone;
     do {
-        if (pdest_frame) {
-            //[1] use a checked out conversion buffer, if one is available
-            opqBuf = pdest_frame;
-            pdest_frame = NULL;
-        } else if (m_opq_pmem_q.m_size) {
-            //[2] else pop out one from the queue, if available
+        if (m_opq_pmem_q.m_size) {
             unsigned address = 0, p2, id;
             m_opq_pmem_q.pop_entry(&address,&p2,&id);
             opqBuf = (OMX_BUFFERHEADERTYPE* ) address;
@@ -4454,11 +4443,9 @@ OMX_ERRORTYPE omx_video::push_empty_eos_buffer(OMX_HANDLETYPE hComp,
         unsigned index = opqBuf - m_inp_mem_ptr;
         if (!opqBuf || index >= m_sInPortDef.nBufferCountActual) {
             DEBUG_PRINT_ERROR("push_empty_eos_buffer: Could not find a "
-                    "color-conversion buffer to queue ! defer until available");
-            //[3] else, returning back will defer calling this function again
-            //until a conversion buffer is returned by the encoder and also
-            //hold on to the client's buffer
-            return OMX_ErrorNone;
+                    "color-conversion buffer to queue !");
+            retVal = OMX_ErrorBadParameter;
+            break;
         }
         struct pmem Input_pmem_info;
         Input_pmem_info.buffer = opqBuf;
